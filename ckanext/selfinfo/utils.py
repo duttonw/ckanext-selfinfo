@@ -25,7 +25,7 @@ from ckan.lib.search.common import (
     make_connection as solr_connection,
 )
 
-import ckanext.selfinfo.config as self_config
+from . import config, utils
 
 
 log = logging.getLogger(__name__)
@@ -36,9 +36,9 @@ def get_redis_key(name):
     Generate a Redis key by combining a prefix, the provided name, and a suffix.
     """
     return (
-        self_config.selfinfo_get_redis_prefix()
+        config.selfinfo_get_redis_prefix()
         + name
-        + self_config.SELFINFO_REDIS_SUFFIX
+        + config.SELFINFO_REDIS_SUFFIX
     )
 
 
@@ -67,7 +67,7 @@ def get_python_modules_info(force_reset: bool = False) -> dict[str, Any]:
 
                 if (
                     now - float(redis.hget(redis_key, "updated").decode("utf-8"))
-                ) > self_config.STORE_TIME or force_reset:
+                ) > config.STORE_TIME or force_reset:
                     data["latest_version"] = get_lib_latest_version(module)
                     for key in data:
                         if data[key] != redis.hget(redis_key, key):
@@ -104,7 +104,7 @@ def get_freeze():
 
 def get_lib_data(lib):
     req = requests.get(
-        self_config.PYPI_URL + lib + "/json",
+        config.PYPI_URL + lib + "/json",
         headers={"Content-Type": "application/json"},
     )
 
@@ -152,7 +152,7 @@ def get_ram_usage() -> dict[str, Any]:
 
 
 def get_disk_usage():
-    paths = self_config.selfinfo_get_partitions()
+    paths = config.selfinfo_get_partitions()
     results = []
 
     for path in paths:
@@ -169,7 +169,7 @@ def get_disk_usage():
                     }
                 )
         except OSError:
-            log.exception(f"Path '{path}' does not exists.")
+            log.exception("Path '%s' does not exists.", path)
     return results
 
 
@@ -182,10 +182,10 @@ def get_platform_info() -> dict[str, Any]:
 
 
 def gather_git_info():
-    ckan_repos_path = self_config.selfinfo_get_repos_path()
+    ckan_repos_path = config.selfinfo_get_repos_path()
     git_info = {"repos_info": [], "access_errors": {}}
     if ckan_repos_path:
-        ckan_repos = self_config.selfinfo_get_repos()
+        ckan_repos = config.selfinfo_get_repos()
         list_repos = (
             ckan_repos
             if ckan_repos
@@ -246,7 +246,8 @@ def get_git_repo(path):
     repo = None
     try:
         repo = git.Repo(path)
-    except git.exc.InvalidGitRepositoryError as e:
+    except Exception:
+        log.debug("Git Collection failed", exc_info=True)
         pass
 
     return repo
@@ -377,7 +378,7 @@ def get_ckan_queues():
 
 def get_solr_schema():
     data = {}
-    schema_filename = self_config.selfinfo_get_solr_schema_filename()
+    schema_filename = config.selfinfo_get_solr_schema_filename()
 
     if solr_available() and schema_filename:
         try:
@@ -393,13 +394,13 @@ def get_solr_schema():
             schema_response.raise_for_status()
 
             data["schema"] = schema_response.text
-        except requests.exceptions.HTTPError as e:
-            log.error("Solr Schema: Please re-check the filename you provided. %s", e)
+        except requests.exceptions.HTTPError:
+            log.exception("Solr Schema: Please re-check the filename you provided.")
 
     return data
 
 
-def retrieve_additionals_redis_keys_info(key):
+def retrieve_additionals_redis_keys_info(key: str):
     redis: Redis = connect_to_redis()
     try:
         selfinfo_key = "selfinfo_" + key
@@ -408,12 +409,12 @@ def retrieve_additionals_redis_keys_info(key):
             data["provided_on"] = str(datetime.fromtimestamp(data["provided_on"]))
     except TypeError:
         data = {}
-        log.error(f"Cannot retrieve data using '{key}' from Redis.")
+        log.error("Cannot retrieve data using '%s' from Redis.", key)
 
     return data
 
 
-def retrieve_additional_selfinfo_by_keys(key):
+def retrieve_additional_selfinfo_by_keys(key: str):
     redis: Redis = connect_to_redis()
     try:
         selfinfo_key = key
@@ -422,29 +423,27 @@ def retrieve_additional_selfinfo_by_keys(key):
             data["provided_on"] = str(datetime.fromtimestamp(data["provided_on"]))
     except TypeError:
         data = {}
-        log.error(f"Cannot retrieve data using '{key}' from Redis.")
+        log.error("Cannot retrieve data using '%s' from Redis.", key)
 
-    if self_config.selfinfo_get_dulicated_envs_mode():
+    if config.selfinfo_get_dulicated_envs_mode():
         keys = selfinfo_internal_ip_keys()
-        shared_categories = self_config.selfinfo_get_dulicated_envs_shared_categories()
-        glob_categories = self_config.CATEGORIES
+        shared_categories = config.selfinfo_get_dulicated_envs_shared_categories()
+        glob_categories = utils.CATEGORIES
         if shared_categories and key in keys:
             for category in shared_categories:
-                if category in glob_categories and not category in data:
+                if category in glob_categories and category not in data:
                     data[category] = glob_categories[category]()
 
     return data
 
 
-def selfinfo_retrieve_iternal_ip():
+def selfinfo_retrieve_internal_ip():
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
     except Exception:
         ip = "127.0.0.1"
-    finally:
-        s.close()
 
     return ip
 
@@ -454,3 +453,21 @@ def selfinfo_internal_ip_keys():
     return [
         i.decode("utf-8") for i in redis.scan_iter(match="selfinfo_duplicated_env_*")
     ]
+
+
+CATEGORIES = {
+    "python_modules": get_python_modules_info,
+    "platform_info": get_platform_info,
+    "ram_usage": get_ram_usage,
+    "disk_usage": get_disk_usage,
+    "git_info": gather_git_info,
+    "freeze": get_freeze,
+    "errors": retrieve_errors,
+    "actions": ckan_actions,
+    "auth_actions": ckan_auth_actions,
+    "blueprints": ckan_bluprints,
+    "helpers": ckan_helpers,
+    "status_show": get_status_show,
+    "ckan_queues": get_ckan_queues,
+    "ckan_solr_schema": get_solr_schema,
+}

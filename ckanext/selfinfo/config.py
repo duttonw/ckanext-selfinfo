@@ -3,25 +3,6 @@ from __future__ import annotations
 from typing import Literal
 
 import ckan.plugins.toolkit as tk
-import ckanext.selfinfo.utils as selfutils
-
-
-CATEGORIES = {
-    "python_modules": selfutils.get_python_modules_info,
-    "platform_info": selfutils.get_platform_info,
-    "ram_usage": selfutils.get_ram_usage,
-    "disk_usage": selfutils.get_disk_usage,
-    "git_info": selfutils.gather_git_info,
-    "freeze": selfutils.get_freeze,
-    "errors": selfutils.retrieve_errors,
-    "actions": selfutils.ckan_actions,
-    "auth_actions": selfutils.ckan_auth_actions,
-    "blueprints": selfutils.ckan_bluprints,
-    "helpers": selfutils.ckan_helpers,
-    "status_show": selfutils.get_status_show,
-    "ckan_queues": selfutils.get_ckan_queues,
-    "ckan_solr_schema": selfutils.get_solr_schema,
-}
 
 SELLFINFO_SET_URL = "ckan.selfinfo.page_url"
 SELLFINFO_DEFAULT_URL = "/ckan-admin/selfinfo"
